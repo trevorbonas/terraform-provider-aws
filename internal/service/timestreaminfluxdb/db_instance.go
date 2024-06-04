@@ -315,6 +315,7 @@ func (r *resourceDbInstance) Schema(ctx context.Context, req resource.SchemaRequ
 			names.AttrTagsAll: tftags.TagsAttributeComputedOnly(),
 			"organization": schema.StringAttribute{
 				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -626,14 +627,34 @@ func (r *resourceDbInstance) Read(ctx context.Context, req resource.ReadRequest,
 	// these cases the flatten function may have a diagnostics return value, which
 	// should be appended to resp.Diagnostics.
 	state.ARN = flex.StringToFramework(ctx, out.Arn)
+	state.AllocatedStorage = flex.Int32ToFramework(ctx, out.AllocatedStorage)
+	state.AvailabilityZone = flex.StringToFramework(ctx, out.AvailabilityZone)
+	state.DBInstanceType = flex.StringToFramework(ctx, (*string)(&out.DbInstanceType))
+	state.DBParameterGroupIdentifier = flex.StringToFramework(ctx, out.DbParameterGroupIdentifier)
+	state.DBStorageType = flex.StringToFramework(ctx, (*string)(&out.DbStorageType))
+	state.DeploymentType = flex.StringToFramework(ctx, (*string)(&out.DeploymentType))
+	state.Endpoint = flex.StringToFramework(ctx, out.Endpoint)
 	state.ID = flex.StringToFramework(ctx, out.Id)
-	state.Name = flex.StringToFramework(ctx, out.Name)
-	state.DBInstanceType = flex.StringToFramework(ctx, (*string)(&out.DbInstanceType.Values()[0]))
-
-	// TIP: Setting a complex type.
+	state.InfluxAuthParametersSecretARN = flex.StringToFramework(ctx, out.InfluxAuthParametersSecretArn)
 	logDeliveryConfiguration, d := flattenLogDeliveryConfiguration(ctx, out.LogDeliveryConfiguration)
 	resp.Diagnostics.Append(d...)
 	state.LogDeliveryConfiguration = logDeliveryConfiguration
+	state.Name = flex.StringToFramework(ctx, out.Name)
+	state.PubliclyAccessible = flex.BoolToFramework(ctx, out.PubliclyAccessible)
+	state.SecondaryAvailabilityZone = flex.StringToFramework(ctx, out.SecondaryAvailabilityZone)
+	state.Status = flex.StringToFramework(ctx, (*string)(&out.Status))
+	state.VPCSecurityGroupIDs = flex.FlattenFrameworkStringValueSet[string](ctx, out.VpcSecurityGroupIds)
+	state.VPCSubnetIDs = flex.FlattenFrameworkStringValueSet[string](ctx, out.VpcSubnetIds)
+
+	tags, err := listTags(ctx, conn, state.ARN.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			create.ProblemStandardMessage(names.TimestreamInfluxDB, create.ErrActionSetting, ResNameDbInstance, state.ID.String(), err),
+			err.Error(),
+		)
+		return
+	}
+	setTagsOut(ctx, Tags(tags))
 
 	// TIP: -- 6. Set the state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -834,7 +855,7 @@ func (r *resourceDbInstance) ModifyPlan(ctx context.Context, request resource.Mo
 // You will need to adjust the parameters and names to fit the service.
 func waitDbInstanceCreated(ctx context.Context, conn *timestreaminfluxdb.Client, id string, timeout time.Duration) (*timestreaminfluxdb.CreateDbInstanceOutput, error) {
 	stateConf := &retry.StateChangeConf{
-		Pending:                   []string{},
+		Pending:                   []string{string(awstypes.StatusCreating), string(awstypes.StatusUpdating), string(awstypes.StatusModifying)},
 		Target:                    []string{string(awstypes.StatusAvailable)},
 		Refresh:                   statusDbInstance(ctx, conn, id),
 		Timeout:                   timeout,
